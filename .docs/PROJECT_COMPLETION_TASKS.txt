@@ -1,0 +1,83 @@
+ESP Relay Control - Project Completion Tasks
+============================================
+Owner: GitHub Copilot
+Started: 2026-08-26
+
+Purpose
+-------
+Finish the ESP-IDF relay component as a reusable, documented, tested,
+and verifiable public component.
+
+Status values: [ ] open, [~] in progress, [x] complete, [!] blocked
+
+1. Repository baseline
+----------------------
+[x] Inspect component API, implementation, example, metadata, and README.
+[x] Confirm ESP-IDF 6.0.2 toolchain and ESP32-P4 Rev. 1.3 hardware access.
+[x] Confirm current working-tree changes are understood and preserved.
+
+2. Public API contract
+----------------------
+[x] Define behavior for every API before initialization and after deinit.
+[x] Validate all configuration values before changing GPIO hardware.
+[x] Document queue-full, callback, timing, and thread-safety behavior.
+[x] Keep public API portable across supported ESP-IDF versions.
+
+3. Controller implementation
+----------------------------
+[x] Make init failure paths fully clean up resources and GPIO state.
+[x] Make deinit safe against concurrent public API calls.
+[x] Ensure task shutdown is ordered and cannot use freed queue/state.
+[x] Verify pulse, timeout, toggle, stop, all-off, and permanent-on semantics.
+[x] Verify callback snapshots and state/timer synchronization.
+
+4. Automated tests
+------------------
+[x] Add ESP-IDF component tests or a documented hardware test procedure.
+[x] Cover invalid arguments and reinitialization behavior.
+[x] Cover pulse timing, safety timeout, toggle, stop, all-off, and callback events.
+[x] Add host-testable mocks for queue overflow and duplicate-GPIO validation.
+
+5. Example and documentation
+----------------------------
+[x] Make the example buildable from a clean checkout.
+[x] Document ESP32-P4 defaults and board-specific GPIO requirements.
+[x] Document flash/QIO configuration and generated sdkconfig behavior.
+[x] Document flashing, monitoring, console commands, and safety limitations.
+[x] Add release-quality integration guidance for other projects.
+
+6. Verification
+---------------
+[x] Build example with ESP-IDF 6.0.2 for esp32p4.
+[x] Flash COM4 and verify ESP32-P4 Rev. 1.3 connection and hashes.
+[x] Verify boot: QIO, 32 MB flash, 360 MHz, controller initialized.
+[x] Run interactive relay command checks on connected hardware.
+[x] Run final clean build and diagnostics after all code changes.
+[x] Review git diff, generated-file hygiene, and release readiness.
+
+Completion rule
+---------------
+The project is complete only when all feasible items are [x]. Any [!]
+item must include a reason and a reproducible user-side alternative.
+
+Final verification result
+-------------------------
+[x] ESP-IDF 6.0.2 build for ESP32-P4 completed successfully.
+[x] Firmware flashed to COM4 and verified on ESP32-P4 revision 1.3.
+[x] Runtime reported 360 MHz CPU, QIO flash, and 32 MB flash.
+[x] Console command acceptance test completed with expected events:
+	STATE_CHANGED, TIMEOUT, PULSE_COMPLETE, toggle, stop, all_off.
+[x] No panic, boot failure, or relay controller initialization error observed.
+[x] Automated ESP-IDF Unity test application builds and runs on the target.
+[x] Add a host-mocked CI harness for queue overflow and duplicate-GPIO paths
+	before claiming exhaustive platform-independent behavioral coverage.
+[x] Add GitHub CI builds for the ESP32-P4 console example and Unity tests.
+[x] Host mock test source passes strict local syntax checking; native execution
+	on Windows is unavailable because no host C compiler is installed.
+
+Known hardware limitation
+-------------------------
+The relay output itself can only be electrically verified with the actual relay
+module connected. The software command and event behavior was verified on the
+connected board. GPIO selection and mains safety remain board and hardware
+design responsibilities.
