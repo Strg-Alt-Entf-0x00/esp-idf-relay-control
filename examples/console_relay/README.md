@@ -1,6 +1,9 @@
-# Relay console example
+# ESP32-P4 relay console example
 
-This ESP-IDF example exposes the complete relay controller through the UART console.
+This ESP-IDF example exposes the complete relay controller through the UART console
+and is configured for an ESP32-P4 with 32 MB QIO flash. The checked-in
+`sdkconfig.defaults` supports ESP32-P4 revision 1.3 and all other revisions
+selected by the ESP-IDF 6.0.2 configuration.
 
 ```text
 help
@@ -15,8 +18,11 @@ all_off                      switch every channel off
 ```
 
 Channel 0 uses active-high GPIO 2 and a 5-second safety timeout. Channel 1 uses
-active-low GPIO 3 and has no automatic timeout. Adjust the GPIOs in
-`main/app_main.c` for the target board before connecting hardware.
+active-low GPIO 3 and has no automatic timeout. These are example pins only;
+verify the GPIOs against the exact ESP32-P4 board before connecting hardware.
+
+The defaults also select a 360 MHz CPU and 32 MB QIO flash. They do not replace
+the board's electrical requirements or a board-specific partition table.
 
 Build and monitor from this directory:
 
@@ -24,4 +30,11 @@ Build and monitor from this directory:
 idf.py set-target esp32p4
 idf.py build
 idf.py flash monitor
+```
+
+The example requires ESP-IDF 6.0.2 or a compatible ESP-IDF release. Use the
+serial port of the connected ESP32-P4 for flashing and monitoring, for example:
+
+```text
+idf.py -p COM5 flash monitor
 ```

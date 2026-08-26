@@ -67,5 +67,7 @@ part of the hardware design.
 ## Example
 
 The [console example](examples/console_relay) exposes the complete relay
-controller through the UART console. Open that directory as the ESP-IDF project
-before building or flashing it.
+controller through the UART console. It is configured for ESP32-P4, including
+revision 1.3 support, 360 MHz CPU frequency, and 32 MB QIO flash. Open that
+directory as the ESP-IDF project before building or flashing it and verify the
+example GPIOs against the target board.

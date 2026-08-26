@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/portmacro.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -36,17 +37,55 @@ typedef struct {
 } relay_controller_state_t;
 
 static relay_controller_state_t s_controller;
+static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static void clear_timer(size_t channel)
+{
+    portENTER_CRITICAL(&s_state_lock);
+    s_controller.off_at_us[channel] = 0;
+    s_controller.safety_timeout[channel] = false;
+    portEXIT_CRITICAL(&s_state_lock);
+}
+
+static void set_timer(size_t channel, int64_t deadline, uint32_t duration_ms, bool safety_timeout)
+{
+    portENTER_CRITICAL(&s_state_lock);
+    s_controller.off_at_us[channel] = deadline;
+    s_controller.pulse_duration_ms[channel] = duration_ms;
+    s_controller.safety_timeout[channel] = safety_timeout;
+    portEXIT_CRITICAL(&s_state_lock);
+}
+
+static bool expire_timer(size_t channel, int64_t now_us, bool *safety_timeout)
+{
+    bool expired = false;
+    portENTER_CRITICAL(&s_state_lock);
+    if (s_controller.off_at_us[channel] != 0 && now_us >= s_controller.off_at_us[channel]) {
+        s_controller.off_at_us[channel] = 0;
+        *safety_timeout = s_controller.safety_timeout[channel];
+        s_controller.safety_timeout[channel] = false;
+        expired = true;
+    }
+    portEXIT_CRITICAL(&s_state_lock);
+    return expired;
+}
+
 static void notify(size_t channel, relay_event_type_t type, bool success)
 {
-    if (!s_controller.callback) return;
+    relay_event_callback_t callback;
+    void *callback_context;
     relay_event_t event = {
         .type = type,
         .channel = channel,
-        .state = s_controller.state[channel],
         .success = success,
-        .duration_ms = s_controller.pulse_duration_ms[channel],
     };
-    s_controller.callback(&event, s_controller.callback_context);
+    portENTER_CRITICAL(&s_state_lock);
+    callback = s_controller.callback;
+    callback_context = s_controller.callback_context;
+    event.state = s_controller.state[channel];
+    event.duration_ms = s_controller.pulse_duration_ms[channel];
+    portEXIT_CRITICAL(&s_state_lock);
+    if (callback) callback(&event, callback_context);
 }
 
 static void write_state(size_t channel, relay_state_t state)
@@ -54,8 +93,12 @@ static void write_state(size_t channel, relay_state_t state)
     const relay_channel_config_t *config = &s_controller.config[channel];
     int level = state == RELAY_STATE_ON ? config->active_level : !config->active_level;
     gpio_set_level(config->gpio, level);
-    if (s_controller.state[channel] != state) {
-        s_controller.state[channel] = state;
+    bool changed;
+    portENTER_CRITICAL(&s_state_lock);
+    changed = s_controller.state[channel] != state;
+    s_controller.state[channel] = state;
+    portEXIT_CRITICAL(&s_state_lock);
+    if (changed) {
         notify(channel, RELAY_EVENT_STATE_CHANGED, true);
     }
 }
@@ -68,50 +111,47 @@ static void controller_task(void *argument)
         while (xQueueReceive(s_controller.queue, &command, 0) == pdTRUE) {
             if (command.type == COMMAND_ALL_OFF) {
                 for (size_t channel = 0; channel < s_controller.channel_count; channel++) {
-                    s_controller.off_at_us[channel] = 0;
-                    s_controller.safety_timeout[channel] = false;
+                    clear_timer(channel);
                     write_state(channel, RELAY_STATE_OFF);
                 }
                 continue;
             }
             if (command.channel >= s_controller.channel_count) continue;
             if (command.type == COMMAND_TOGGLE) {
-                s_controller.off_at_us[command.channel] = 0;
-                s_controller.safety_timeout[command.channel] = false;
-                write_state(command.channel, s_controller.state[command.channel] == RELAY_STATE_ON ?
+                clear_timer(command.channel);
+                relay_state_t current_state;
+                portENTER_CRITICAL(&s_state_lock);
+                current_state = s_controller.state[command.channel];
+                portEXIT_CRITICAL(&s_state_lock);
+                write_state(command.channel, current_state == RELAY_STATE_ON ?
                             RELAY_STATE_OFF : RELAY_STATE_ON);
             } else if (command.type == COMMAND_SET) {
                 write_state(command.channel, command.state);
                 if (command.state == RELAY_STATE_ON &&
                     s_controller.config[command.channel].max_on_time_ms != 0) {
-                    s_controller.safety_timeout[command.channel] = true;
-                    s_controller.pulse_duration_ms[command.channel] =
-                        s_controller.config[command.channel].max_on_time_ms;
-                    s_controller.off_at_us[command.channel] = esp_timer_get_time() +
-                        (int64_t)s_controller.config[command.channel].max_on_time_ms * 1000;
+                    uint32_t maximum = s_controller.config[command.channel].max_on_time_ms;
+                    set_timer(command.channel, esp_timer_get_time() + (int64_t)maximum * 1000,
+                              maximum, true);
                 } else {
-                    s_controller.safety_timeout[command.channel] = false;
-                    s_controller.off_at_us[command.channel] = 0;
+                    clear_timer(command.channel);
                 }
             } else {
                 uint32_t duration_ms = command.duration_ms;
                 uint32_t maximum = s_controller.config[command.channel].max_on_time_ms;
-                s_controller.safety_timeout[command.channel] = maximum != 0 && duration_ms > maximum;
+                bool safety_timeout = maximum != 0 && duration_ms > maximum;
                 if (maximum != 0 && duration_ms > maximum) duration_ms = maximum;
                 write_state(command.channel, RELAY_STATE_ON);
-                s_controller.pulse_duration_ms[command.channel] = duration_ms;
-                s_controller.off_at_us[command.channel] = esp_timer_get_time() + (int64_t)duration_ms * 1000;
+                set_timer(command.channel, esp_timer_get_time() + (int64_t)duration_ms * 1000,
+                          duration_ms, safety_timeout);
             }
         }
 
         int64_t now_us = esp_timer_get_time();
         for (size_t channel = 0; channel < s_controller.channel_count; channel++) {
-            if (s_controller.off_at_us[channel] != 0 && now_us >= s_controller.off_at_us[channel]) {
-                s_controller.off_at_us[channel] = 0;
+            bool safety_timeout = false;
+            if (expire_timer(channel, now_us, &safety_timeout)) {
                 write_state(channel, RELAY_STATE_OFF);
-                  notify(channel, s_controller.safety_timeout[channel] ? RELAY_EVENT_TIMEOUT :
-                      RELAY_EVENT_PULSE_COMPLETE, true);
-                  s_controller.safety_timeout[channel] = false;
+                notify(channel, safety_timeout ? RELAY_EVENT_TIMEOUT : RELAY_EVENT_PULSE_COMPLETE, true);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
@@ -131,6 +171,19 @@ esp_err_t relay_controller_init(const relay_controller_config_t *config)
         config->channel_count > RELAY_CONTROLLER_MAX_CHANNELS) return ESP_ERR_INVALID_ARG;
     if (s_controller.initialized) return ESP_ERR_INVALID_STATE;
 
+    for (size_t channel = 0; channel < config->channel_count; channel++) {
+        const relay_channel_config_t *channel_config = &config->channels[channel];
+        if (!GPIO_IS_VALID_OUTPUT_GPIO(channel_config->gpio) ||
+            channel_config->active_level > 1 || channel_config->initial_state > RELAY_STATE_ON) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        for (size_t previous = 0; previous < channel; previous++) {
+            if (config->channels[previous].gpio == channel_config->gpio) {
+                return ESP_ERR_INVALID_ARG;
+            }
+        }
+    }
+
     memset(&s_controller, 0, sizeof(s_controller));
     s_controller.channel_count = config->channel_count;
     memcpy(s_controller.config, config->channels,
@@ -138,8 +191,6 @@ esp_err_t relay_controller_init(const relay_controller_config_t *config)
 
     for (size_t channel = 0; channel < s_controller.channel_count; channel++) {
         const relay_channel_config_t *channel_config = &s_controller.config[channel];
-        if (!GPIO_IS_VALID_OUTPUT_GPIO(channel_config->gpio) ||
-            channel_config->active_level > 1) return ESP_ERR_INVALID_ARG;
         gpio_config_t gpio_configuration = {
             .pin_bit_mask = 1ULL << channel_config->gpio,
             .mode = GPIO_MODE_OUTPUT,
@@ -185,8 +236,10 @@ esp_err_t relay_controller_deinit(void)
 esp_err_t relay_controller_set_callback(relay_event_callback_t callback, void *user_context)
 {
     if (!s_controller.initialized) return ESP_ERR_INVALID_STATE;
+    portENTER_CRITICAL(&s_state_lock);
     s_controller.callback = callback;
     s_controller.callback_context = user_context;
+    portEXIT_CRITICAL(&s_state_lock);
     return ESP_OK;
 }
 
@@ -207,14 +260,21 @@ esp_err_t relay_controller_get_state(size_t channel, relay_state_t *state)
 {
     if (!s_controller.initialized || !state) return ESP_ERR_INVALID_ARG;
     if (channel >= s_controller.channel_count) return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&s_state_lock);
     *state = s_controller.state[channel];
+    portEXIT_CRITICAL(&s_state_lock);
     return ESP_OK;
 }
 
 bool relay_controller_is_busy(size_t channel)
 {
-    return s_controller.initialized && channel < s_controller.channel_count &&
-           s_controller.off_at_us[channel] != 0;
+    bool busy = false;
+    portENTER_CRITICAL(&s_state_lock);
+    if (s_controller.initialized && channel < s_controller.channel_count) {
+        busy = s_controller.off_at_us[channel] != 0;
+    }
+    portEXIT_CRITICAL(&s_state_lock);
+    return busy;
 }
 
 esp_err_t relay_controller_toggle(size_t channel)
@@ -243,7 +303,9 @@ esp_err_t relay_controller_get_remaining_ms(size_t channel, uint32_t *remaining_
 {
     if (!s_controller.initialized || !remaining_ms) return ESP_ERR_INVALID_ARG;
     if (channel >= s_controller.channel_count) return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&s_state_lock);
     int64_t deadline = s_controller.off_at_us[channel];
+    portEXIT_CRITICAL(&s_state_lock);
     if (deadline == 0) {
         *remaining_ms = 0;
         return ESP_OK;
