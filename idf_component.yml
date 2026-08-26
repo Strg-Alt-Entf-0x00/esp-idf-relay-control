@@ -1,0 +1,6 @@
+version: "1.0.0"
+description: "Non-blocking, multi-channel relay controller for ESP-IDF"
+license: "MIT"
+dependencies:
+  idf:
+    version: ">=5.0.0"
