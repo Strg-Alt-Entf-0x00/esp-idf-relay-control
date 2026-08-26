@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include <string.h>
 
@@ -14,7 +15,13 @@ static const char *TAG = "RELAY_CTRL";
 #define DEFAULT_TASK_PRIORITY 5
 #define POLL_INTERVAL_MS 10
 
-typedef enum { COMMAND_SET, COMMAND_PULSE, COMMAND_TOGGLE, COMMAND_ALL_OFF } command_type_t;
+typedef enum {
+    COMMAND_SET,
+    COMMAND_PULSE,
+    COMMAND_TOGGLE,
+    COMMAND_ALL_OFF,
+    COMMAND_SHUTDOWN,
+} command_type_t;
 typedef struct {
     command_type_t type;
     size_t channel;
@@ -29,6 +36,7 @@ typedef struct {
     uint32_t pulse_duration_ms[RELAY_CONTROLLER_MAX_CHANNELS];
     bool safety_timeout[RELAY_CONTROLLER_MAX_CHANNELS];
     QueueHandle_t queue;
+    SemaphoreHandle_t shutdown_semaphore;
     TaskHandle_t task;
     relay_event_callback_t callback;
     void *callback_context;
@@ -38,6 +46,24 @@ typedef struct {
 
 static relay_controller_state_t s_controller;
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_lifecycle_init_lock = portMUX_INITIALIZER_UNLOCKED;
+static SemaphoreHandle_t s_lifecycle_mutex;
+static StaticSemaphore_t s_lifecycle_mutex_storage;
+
+static esp_err_t take_lifecycle_mutex(void)
+{
+    portENTER_CRITICAL(&s_lifecycle_init_lock);
+    if (!s_lifecycle_mutex) {
+        s_lifecycle_mutex = xSemaphoreCreateMutexStatic(&s_lifecycle_mutex_storage);
+    }
+    portEXIT_CRITICAL(&s_lifecycle_init_lock);
+    return xSemaphoreTake(s_lifecycle_mutex, portMAX_DELAY) == pdTRUE ? ESP_OK : ESP_FAIL;
+}
+
+static void give_lifecycle_mutex(void)
+{
+    xSemaphoreGive(s_lifecycle_mutex);
+}
 
 static void clear_timer(size_t channel)
 {
@@ -68,6 +94,14 @@ static bool expire_timer(size_t channel, int64_t now_us, bool *safety_timeout)
     }
     portEXIT_CRITICAL(&s_state_lock);
     return expired;
+}
+
+static void switch_off_configured_gpios(size_t channel_count)
+{
+    for (size_t channel = 0; channel < channel_count; channel++) {
+        gpio_set_level(s_controller.config[channel].gpio,
+                       !s_controller.config[channel].active_level);
+    }
 }
 
 static void notify(size_t channel, relay_event_type_t type, bool success)
@@ -109,6 +143,11 @@ static void controller_task(void *argument)
     controller_command_t command;
     while (true) {
         while (xQueueReceive(s_controller.queue, &command, 0) == pdTRUE) {
+            if (command.type == COMMAND_SHUTDOWN) {
+                switch_off_configured_gpios(s_controller.channel_count);
+                xSemaphoreGive(s_controller.shutdown_semaphore);
+                vTaskDelete(NULL);
+            }
             if (command.type == COMMAND_ALL_OFF) {
                 for (size_t channel = 0; channel < s_controller.channel_count; channel++) {
                     clear_timer(channel);
@@ -160,25 +199,42 @@ static void controller_task(void *argument)
 
 static esp_err_t queue_command(controller_command_t command)
 {
-    if (!s_controller.initialized) return ESP_ERR_INVALID_STATE;
-    if (command.channel >= s_controller.channel_count) return ESP_ERR_INVALID_ARG;
-    return xQueueSend(s_controller.queue, &command, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+    esp_err_t ret = take_lifecycle_mutex();
+    if (ret != ESP_OK) return ret;
+    if (!s_controller.initialized) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (command.channel >= s_controller.channel_count) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_ARG;
+    }
+    ret = xQueueSend(s_controller.queue, &command, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+    give_lifecycle_mutex();
+    return ret;
 }
 
 esp_err_t relay_controller_init(const relay_controller_config_t *config)
 {
     if (!config || !config->channels || config->channel_count == 0 ||
         config->channel_count > RELAY_CONTROLLER_MAX_CHANNELS) return ESP_ERR_INVALID_ARG;
-    if (s_controller.initialized) return ESP_ERR_INVALID_STATE;
+    esp_err_t ret = take_lifecycle_mutex();
+    if (ret != ESP_OK) return ret;
+    if (s_controller.initialized) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_STATE;
+    }
 
     for (size_t channel = 0; channel < config->channel_count; channel++) {
         const relay_channel_config_t *channel_config = &config->channels[channel];
         if (!GPIO_IS_VALID_OUTPUT_GPIO(channel_config->gpio) ||
             channel_config->active_level > 1 || channel_config->initial_state > RELAY_STATE_ON) {
+            give_lifecycle_mutex();
             return ESP_ERR_INVALID_ARG;
         }
         for (size_t previous = 0; previous < channel; previous++) {
             if (config->channels[previous].gpio == channel_config->gpio) {
+                give_lifecycle_mutex();
                 return ESP_ERR_INVALID_ARG;
             }
         }
@@ -189,6 +245,7 @@ esp_err_t relay_controller_init(const relay_controller_config_t *config)
     memcpy(s_controller.config, config->channels,
            config->channel_count * sizeof(relay_channel_config_t));
 
+    size_t configured_channels = 0;
     for (size_t channel = 0; channel < s_controller.channel_count; channel++) {
         const relay_channel_config_t *channel_config = &s_controller.config[channel];
         gpio_config_t gpio_configuration = {
@@ -198,8 +255,14 @@ esp_err_t relay_controller_init(const relay_controller_config_t *config)
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
             .intr_type = GPIO_INTR_DISABLE,
         };
-        esp_err_t ret = gpio_config(&gpio_configuration);
-        if (ret != ESP_OK) return ret;
+        ret = gpio_config(&gpio_configuration);
+        if (ret != ESP_OK) {
+            switch_off_configured_gpios(configured_channels);
+            memset(&s_controller, 0, sizeof(s_controller));
+            give_lifecycle_mutex();
+            return ret;
+        }
+        configured_channels++;
         s_controller.state[channel] = channel_config->initial_state;
         write_state(channel, channel_config->initial_state);
     }
@@ -208,38 +271,75 @@ esp_err_t relay_controller_init(const relay_controller_config_t *config)
     uint16_t stack_size = config->task_stack_size ? config->task_stack_size : DEFAULT_TASK_STACK;
     uint8_t priority = config->task_priority ? config->task_priority : DEFAULT_TASK_PRIORITY;
     s_controller.queue = xQueueCreate(queue_length, sizeof(controller_command_t));
-    if (!s_controller.queue) return ESP_ERR_NO_MEM;
+    if (!s_controller.queue) {
+        switch_off_configured_gpios(configured_channels);
+        memset(&s_controller, 0, sizeof(s_controller));
+        give_lifecycle_mutex();
+        return ESP_ERR_NO_MEM;
+    }
+    s_controller.shutdown_semaphore = xSemaphoreCreateBinary();
+    if (!s_controller.shutdown_semaphore) {
+        vQueueDelete(s_controller.queue);
+        switch_off_configured_gpios(configured_channels);
+        memset(&s_controller, 0, sizeof(s_controller));
+        give_lifecycle_mutex();
+        return ESP_ERR_NO_MEM;
+    }
     if (xTaskCreate(controller_task, "relay_controller", stack_size, NULL, priority,
                     &s_controller.task) != pdPASS) {
         vQueueDelete(s_controller.queue);
+        vSemaphoreDelete(s_controller.shutdown_semaphore);
+        switch_off_configured_gpios(configured_channels);
         s_controller.queue = NULL;
+        s_controller.shutdown_semaphore = NULL;
+        memset(&s_controller, 0, sizeof(s_controller));
+        give_lifecycle_mutex();
         return ESP_ERR_NO_MEM;
     }
     s_controller.initialized = true;
     ESP_LOGI(TAG, "Initialized %u relay channel(s)", (unsigned)s_controller.channel_count);
+    give_lifecycle_mutex();
     return ESP_OK;
 }
 
 esp_err_t relay_controller_deinit(void)
 {
-    if (!s_controller.initialized) return ESP_OK;
-    vTaskDelete(s_controller.task);
-    for (size_t channel = 0; channel < s_controller.channel_count; channel++) {
-        gpio_set_level(s_controller.config[channel].gpio,
-                       !s_controller.config[channel].active_level);
+    esp_err_t ret = take_lifecycle_mutex();
+    if (ret != ESP_OK) return ret;
+    if (!s_controller.initialized) {
+        give_lifecycle_mutex();
+        return ESP_OK;
+    }
+    if (s_controller.task == xTaskGetCurrentTaskHandle()) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_STATE;
+    }
+    controller_command_t shutdown = { .type = COMMAND_SHUTDOWN };
+    if (xQueueSend(s_controller.queue, &shutdown, portMAX_DELAY) != pdTRUE ||
+        xSemaphoreTake(s_controller.shutdown_semaphore, portMAX_DELAY) != pdTRUE) {
+        give_lifecycle_mutex();
+        return ESP_FAIL;
     }
     vQueueDelete(s_controller.queue);
+    vSemaphoreDelete(s_controller.shutdown_semaphore);
     memset(&s_controller, 0, sizeof(s_controller));
+    give_lifecycle_mutex();
     return ESP_OK;
 }
 
 esp_err_t relay_controller_set_callback(relay_event_callback_t callback, void *user_context)
 {
-    if (!s_controller.initialized) return ESP_ERR_INVALID_STATE;
+    esp_err_t ret = take_lifecycle_mutex();
+    if (ret != ESP_OK) return ret;
+    if (!s_controller.initialized) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_STATE;
+    }
     portENTER_CRITICAL(&s_state_lock);
     s_controller.callback = callback;
     s_controller.callback_context = user_context;
     portEXIT_CRITICAL(&s_state_lock);
+    give_lifecycle_mutex();
     return ESP_OK;
 }
 
@@ -258,22 +358,34 @@ esp_err_t relay_controller_pulse(size_t channel, uint32_t duration_ms)
 
 esp_err_t relay_controller_get_state(size_t channel, relay_state_t *state)
 {
-    if (!s_controller.initialized || !state) return ESP_ERR_INVALID_ARG;
-    if (channel >= s_controller.channel_count) return ESP_ERR_INVALID_ARG;
+    if (!state) return ESP_ERR_INVALID_ARG;
+    esp_err_t ret = take_lifecycle_mutex();
+    if (ret != ESP_OK) return ret;
+    if (!s_controller.initialized) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (channel >= s_controller.channel_count) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_ARG;
+    }
     portENTER_CRITICAL(&s_state_lock);
     *state = s_controller.state[channel];
     portEXIT_CRITICAL(&s_state_lock);
+    give_lifecycle_mutex();
     return ESP_OK;
 }
 
 bool relay_controller_is_busy(size_t channel)
 {
     bool busy = false;
+    if (take_lifecycle_mutex() != ESP_OK) return false;
     portENTER_CRITICAL(&s_state_lock);
     if (s_controller.initialized && channel < s_controller.channel_count) {
         busy = s_controller.off_at_us[channel] != 0;
     }
     portEXIT_CRITICAL(&s_state_lock);
+    give_lifecycle_mutex();
     return busy;
 }
 
@@ -294,23 +406,41 @@ esp_err_t relay_controller_all_off(void)
 
 esp_err_t relay_controller_get_channel_count(size_t *channel_count)
 {
-    if (!s_controller.initialized || !channel_count) return ESP_ERR_INVALID_ARG;
+    if (!channel_count) return ESP_ERR_INVALID_ARG;
+    esp_err_t ret = take_lifecycle_mutex();
+    if (ret != ESP_OK) return ret;
+    if (!s_controller.initialized) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_STATE;
+    }
     *channel_count = s_controller.channel_count;
+    give_lifecycle_mutex();
     return ESP_OK;
 }
 
 esp_err_t relay_controller_get_remaining_ms(size_t channel, uint32_t *remaining_ms)
 {
-    if (!s_controller.initialized || !remaining_ms) return ESP_ERR_INVALID_ARG;
-    if (channel >= s_controller.channel_count) return ESP_ERR_INVALID_ARG;
+    if (!remaining_ms) return ESP_ERR_INVALID_ARG;
+    esp_err_t ret = take_lifecycle_mutex();
+    if (ret != ESP_OK) return ret;
+    if (!s_controller.initialized) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (channel >= s_controller.channel_count) {
+        give_lifecycle_mutex();
+        return ESP_ERR_INVALID_ARG;
+    }
     portENTER_CRITICAL(&s_state_lock);
     int64_t deadline = s_controller.off_at_us[channel];
     portEXIT_CRITICAL(&s_state_lock);
     if (deadline == 0) {
         *remaining_ms = 0;
+        give_lifecycle_mutex();
         return ESP_OK;
     }
     int64_t remaining_us = deadline - esp_timer_get_time();
     *remaining_ms = remaining_us > 0 ? (uint32_t)((remaining_us + 999) / 1000) : 0;
+    give_lifecycle_mutex();
     return ESP_OK;
 }

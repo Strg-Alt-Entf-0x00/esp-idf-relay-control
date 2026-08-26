@@ -49,8 +49,24 @@ typedef struct {
 
 typedef void (*relay_event_callback_t)(const relay_event_t *event, void *user_context);
 
+/**
+ * Initialize the controller and configure all channel GPIOs.
+ *
+ * The channel configuration must remain valid until this function returns.
+ * All other public functions are safe to call from normal FreeRTOS tasks and
+ * are serialized with init/deinit. They are not ISR-safe.
+ */
 esp_err_t relay_controller_init(const relay_controller_config_t *config);
+
+/**
+ * Stop the controller, switch every configured GPIO off, and release resources.
+ *
+ * This function waits for queued commands to finish before stopping the
+ * controller task. It must not be called from the event callback.
+ */
 esp_err_t relay_controller_deinit(void);
+
+/** Register or clear the callback. The callback runs in the controller task. */
 esp_err_t relay_controller_set_callback(relay_event_callback_t callback, void *user_context);
 esp_err_t relay_controller_set(size_t channel, relay_state_t state);
 esp_err_t relay_controller_pulse(size_t channel, uint32_t duration_ms);
