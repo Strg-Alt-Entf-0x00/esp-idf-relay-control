@@ -18,10 +18,8 @@ sdkconfig.old
 *.uf2
 
 # Backup archives and local historical material
-tools/backup/backups/
 .archive/
-.docs/
-.refence_codes/
+
 
 # Python and local tooling
 __pycache__/
