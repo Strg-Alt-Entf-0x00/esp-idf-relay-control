@@ -1,4 +1,6 @@
-# ESP-IDF generated output
+# ==============================================================================
+# ESP-IDF Build Artifacts
+# ==============================================================================
 build/
 **/build/
 managed_components/
@@ -10,48 +12,61 @@ sdkconfig
 sdkconfig.old
 **/sdkconfig.old
 
-# Firmware and generated binaries
+# ==============================================================================
+# Binary and Compiled Files
+# ==============================================================================
 *.bin
 *.elf
 *.map
 *.hex
 *.uf2
 
-# Backup archives and local historical material
-.archive/
-
-
-# Python and local tooling
+# ==============================================================================
+# Python
+# ==============================================================================
+*.py[cod]
 __pycache__/
 **/__pycache__/
-*.py[cod]
 *.egg-info/
 .venv/
 venv/
 env/
 .env
 
-# IDE files
-.vscode/
-.idea/
-.clangd
+# ==============================================================================
+# IDE and Editor
+# ==============================================================================
 *.suo
 *.user
 *.userossc
 *.sln
-
-# Operating-system files
-.DS_Store
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-Desktop.ini
-
-# Temporary files
 *.tmp
 *.temp
 *.swp
 *.swo
 *~
+.clangd
+.vscode/
+.idea/
+
+# ==============================================================================
+# OS Generated Files
+# ==============================================================================
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ==============================================================================
+# Reference and Archive Code
+# ==============================================================================
+.archive/
+.docs/
+.old_code/
+.reference_codes/
