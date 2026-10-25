@@ -1,5 +1,7 @@
 # ESP-IDF Relay Controller
 
+[Changelog](CHANGELOG.md)
+
 Non-blocking GPIO relay control for ESP-IDF. The component supports multiple
 independent channels, parallel pulses, active-high or active-low relay modules,
 and optional automatic off limits.
