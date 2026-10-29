@@ -17,9 +17,10 @@ stop <channel>               stop a pulse and switch off
 all_off                      switch every channel off
 ```
 
-Channel 0 uses active-high GPIO 2 and a 5-second safety timeout. Channel 1 uses
-active-low GPIO 3 and has no automatic timeout. These are example pins only;
-verify the GPIOs against the exact ESP32-P4 board before connecting hardware.
+Both channels use active-low inputs: channel 0 uses GPIO 32 and a 5-second
+safety timeout; channel 1 uses GPIO 33 and has no automatic timeout. The
+channel LEDs should indicate when their respective relays are energized.
+Verify the board markings and wiring before connecting a load.
 
 The defaults also select a 360 MHz CPU and 32 MB QIO flash. They do not replace
 the board's electrical requirements or a board-specific partition table.

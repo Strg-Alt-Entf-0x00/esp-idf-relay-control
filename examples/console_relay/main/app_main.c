@@ -158,8 +158,8 @@ void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
     static const relay_channel_config_t channels[] = {
-        { .gpio = GPIO_NUM_2, .active_level = 1, .initial_state = RELAY_STATE_OFF, .max_on_time_ms = 5000 },
-        { .gpio = GPIO_NUM_3, .active_level = 0, .initial_state = RELAY_STATE_OFF, .max_on_time_ms = 0 },
+        { .gpio = GPIO_NUM_32, .active_level = 0, .initial_state = RELAY_STATE_OFF, .max_on_time_ms = 5000 },
+        { .gpio = GPIO_NUM_33, .active_level = 0, .initial_state = RELAY_STATE_OFF, .max_on_time_ms = 0 },
     };
     ESP_ERROR_CHECK(relay_controller_init(&(relay_controller_config_t){
         .channels = channels,

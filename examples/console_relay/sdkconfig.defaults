@@ -1,3 +1,8 @@
+# ESP-IDF sdkconfig defaults
+# Example: esp-idf-relay-control / examples/console_relay
+# Hardware-specific options must match the target board and ESP-IDF version.
+# Entries and values are preserved; sections are ordered for easier review.
+
 # ============================================================================
 # ESP32-P4 Hardware Target Configuration
 # ============================================================================
