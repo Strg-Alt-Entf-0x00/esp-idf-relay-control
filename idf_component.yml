@@ -4,12 +4,3 @@ license: "MIT"
 dependencies:
   idf:
     version: ">=5.0.0"
-
-files:
-  exclude:
-    - "**/.*"
-    - "**/.*/**/*"
-    - "**/.venv/**/*"
-    - "**/*.egg-info/**/*"
-    - "**/*.old"
-    - "**/*.bak"
