@@ -105,7 +105,7 @@ part of the hardware design.
 
 ## Example
 
-The [Waveshare ESP32-P4-WIFI6 console example](examples/ws-esp32-p4-wifi6-console_relay_dev)
+The [Waveshare ESP32-P4-WIFI6 console example](examples/ws-esp32-p4-wifi6-console-relay-dev)
 exposes the relay controller through the UART console using GPIOs 32 and 33.
 It does not use the board's Wi-Fi coprocessor. Open that directory as the
 ESP-IDF project before building or flashing it, and verify the pinout and
