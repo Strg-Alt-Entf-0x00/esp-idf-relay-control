@@ -57,6 +57,24 @@ TEST_CASE("initializes and reports channels", "relay_controller")
     TEST_ASSERT_EQUAL_UINT(2, channel_count);
 }
 
+TEST_CASE("deinitializes and can be initialized again", "relay_controller")
+{
+    size_t channel_count = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, relay_controller_init(&(relay_controller_config_t){
+        .channels = test_channels,
+        .channel_count = 2,
+    }));
+    TEST_ASSERT_EQUAL(ESP_OK, relay_controller_deinit());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+                      relay_controller_get_channel_count(&channel_count));
+    TEST_ASSERT_EQUAL(ESP_OK, relay_controller_init(&(relay_controller_config_t){
+        .channels = test_channels,
+        .channel_count = 2,
+    }));
+    TEST_ASSERT_EQUAL(ESP_OK, relay_controller_get_channel_count(&channel_count));
+    TEST_ASSERT_EQUAL_UINT(2, channel_count);
+}
+
 TEST_CASE("runs a pulse and reports completion", "relay_controller")
 {
     relay_state_t state = RELAY_STATE_OFF;
@@ -69,6 +87,7 @@ TEST_CASE("runs a pulse and reports completion", "relay_controller")
     wait_ms(100);
     TEST_ASSERT_EQUAL(ESP_OK, relay_controller_get_state(0, &state));
     TEST_ASSERT_EQUAL(RELAY_STATE_OFF, state);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT(2, state_changed_count);
     TEST_ASSERT_GREATER_OR_EQUAL_UINT(1, pulse_complete_count);
 }
 
@@ -94,6 +113,18 @@ TEST_CASE("toggle, stop, and all_off control channels", "relay_controller")
         .channels = test_channels,
         .channel_count = 2,
     }));
+    TEST_ASSERT_EQUAL(ESP_OK, relay_controller_set_callback(relay_event, NULL));
+    TEST_ASSERT_EQUAL(ESP_OK, relay_controller_pulse(1, 150));
+    wait_ms(30);
+    TEST_ASSERT_EQUAL(ESP_OK, relay_controller_get_state(1, &state));
+    TEST_ASSERT_EQUAL(RELAY_STATE_ON, state);
+    TEST_ASSERT_EQUAL(ESP_OK, relay_controller_stop(1));
+    wait_ms(30);
+    TEST_ASSERT_EQUAL(ESP_OK, relay_controller_get_state(1, &state));
+    TEST_ASSERT_EQUAL(RELAY_STATE_OFF, state);
+    wait_ms(120);
+    TEST_ASSERT_EQUAL_UINT(0, pulse_complete_count);
+
     TEST_ASSERT_EQUAL(ESP_OK, relay_controller_toggle(1));
     wait_ms(30);
     TEST_ASSERT_EQUAL(ESP_OK, relay_controller_get_state(1, &state));

@@ -1,7 +1,5 @@
 # ESP-IDF Relay Controller
 
-[Changelog](CHANGELOG.md)
-
 Non-blocking GPIO relay control for ESP-IDF. The component supports multiple
 independent channels, parallel pulses, active-high or active-low relay modules,
 and optional automatic off limits.
@@ -116,7 +114,8 @@ relay-module wiring for the board revision.
 ## Tests
 
 The ESP-IDF Unity test application is in
-`test_apps/relay_controller`. It covers argument validation, initialization,
-reinitialization, pulses, safety timeouts, callbacks, toggle, stop, and
-`all_off`. Host mock tests for queue overflow and duplicate GPIO validation are
-in `host_tests` and run automatically in GitHub Actions.
+[`test_apps/relay_controller`](test_apps/relay_controller/README.md). It runs
+six Unity tests on an ESP32-P4, covering argument validation,
+initialization/reinitialization, pulse completion, safety timeouts, callbacks,
+toggle, stop, and `all_off`. The test app drives GPIOs 2 and 3; see its README
+for safe hardware setup.
