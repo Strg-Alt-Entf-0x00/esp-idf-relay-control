@@ -111,6 +111,23 @@ It does not use the board's Wi-Fi coprocessor. Open that directory as the
 ESP-IDF project before building or flashing it, and verify the pinout and
 relay-module wiring for the board revision.
 
+## Relay Controller Studio
+
+A modular, standalone browser Studio is available at
+[`tools-web/index.html`](tools-web/index.html), with local CSS and JavaScript
+assets under `tools-web/css/` and `tools-web/js/`. It supports Web Serial
+(115200 baud) and includes a built-in firmware simulator for offline testing:
+- **Arbitrary Channel Scalability**: Manage 1 to 16 channels dynamically.
+- **Master Orchestration & Safety**: Emergency All Off (`all_off`), All On, and Staggered Inrush-safe Power-On.
+- **Mutual Interlock**: Mutual exclusivity lockout mode (ensures only 1 channel active at a time).
+- **Tactile Relays & Pulse Timers**: Live countdown timers, remaining-ms badges, and polarity config.
+- **Integrated Terminal Drawer**: Collapsible serial console with CLI command history.
+
+Simulator responses and relay states are generated locally; they do not
+actuate GPIOs or report the state of connected hardware. Physical switching
+and device-reported status require a serial connection to the ESP32 and
+correctly wired relay hardware.
+
 ## Tests
 
 The ESP-IDF Unity test application is in

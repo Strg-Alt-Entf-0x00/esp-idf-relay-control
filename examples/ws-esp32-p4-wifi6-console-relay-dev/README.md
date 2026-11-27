@@ -40,3 +40,7 @@ example:
 ```text
 idf.py -p COM5 flash monitor
 ```
+
+## Web Studio Console
+
+For visual browser control and real-time Web Serial testing without manual CLI typing, open [`tools-web/index.html`](../../tools-web/index.html).

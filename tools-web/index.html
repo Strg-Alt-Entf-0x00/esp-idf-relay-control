@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relay Controller Studio · Industrial Multi-Channel Switch &amp; Sequencer</title>
+
+  <link rel="stylesheet" href="css/design-system.css">
+  <link rel="stylesheet" href="css/console.css">
+</head>
+<body>
+
+  <!-- ========================================================================
+   * SHELL: App Header
+   * ======================================================================== -->
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="brand-title">RELAY CONTROLLER STUDIO</div>
+      <div class="brand-sub">Multi-Channel Relay Sequencer</div>
+    </div>
+
+    <div class="header-actions">
+      <!-- Status Badge -->
+      <div class="conn-status-badge" id="connStatusBadge">
+        <span class="conn-indicator-dot" id="connDot"></span>
+        <span id="connLabel">SIMULATOR ACTIVE</span>
+      </div>
+
+      <!-- Web Serial Connect Button (Exact standard USB cable icon from clock & espormant) -->
+      <button class="icon-btn" id="btnConnect" data-tooltip="Connect ESP32 (115200 Baud)" aria-label="Connect ESP32" onclick="toggleSerialConnection()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v6m0 0l3-3m-3 3L9 5M5 11h14M7 11v5a5 5 0 0010 0v-5"></path>
+        </svg>
+      </button>
+
+      <!-- Toggle Terminal Drawer (Pure Icon Button) -->
+      <button class="icon-btn" id="btnToggleTerm" data-tooltip="Toggle Serial Console" aria-label="Toggle Serial Console" onclick="toggleTerminalDrawer()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="4 17 10 11 4 5"></polyline>
+          <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+      </button>
+
+      <!-- Documentation & Help (Pure Icon Button) -->
+      <button class="icon-btn" id="btnHelp" data-tooltip="Help &amp; Reference" aria-label="Open Help" onclick="openHelpModal()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+   * WORKSPACE CONTENT: Formant / Studio Workspace Grid (Sidebar + Main)
+   * ======================================================================== -->
+  <main class="studio-workspace-grid">
+    
+    <!-- Left Sidebar: Master Orchestration, Safety & Global Defaults -->
+    <aside class="workspace-sidebar">
+      
+      <!-- Card 1: Master Controls & Emergency -->
+      <div class="panel-card">
+        <div class="panel-title">
+          <span>Master Switching &amp; Emergency</span>
+        </div>
+        
+        <!-- Emergency All Off Button -->
+        <button class="btn-emergency-all-off" id="btnEmergencyOff" onclick="triggerEmergencyAllOff()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+            <line x1="12" y1="2" x2="12" y2="12"></line>
+          </svg>
+          EMERGENCY ALL OFF
+        </button>
+
+        <!-- All On Button -->
+        <button class="btn-sidebar-action emerald" id="btnAllOn" onclick="triggerAllChannelsOn()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          ALL CHANNELS ON
+        </button>
+
+        <!-- Staggered Auto-Sequencer -->
+        <button class="btn-sidebar-action ice" id="btnStaggeredSeq" onclick="triggerStaggeredSequencer()" title="Sequentially energizes relays with delay to prevent power supply inrush surges">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          STAGGERED POWER-ON
+        </button>
+      </div>
+
+      <!-- Card 2: Mutual Interlock Safety -->
+      <div class="panel-card">
+        <div class="panel-title">
+          <span>Safety &amp; Interlock Lockout</span>
+        </div>
+        <label class="sidebar-toggle-wrapper" title="Mutual Interlock: Only one relay can be energized at a time. Activating another automatically cuts off the previous.">
+          <span>MUTUAL INTERLOCK</span>
+          <input type="checkbox" id="chkInterlock" onchange="toggleInterlockMode(this.checked)">
+        </label>
+        <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4;">
+          Enforces single-relay mutual exclusion (1-at-a-time). Critical for motor direction / H-bridge protection.
+        </p>
+      </div>
+
+      <!-- Card 3: Channel Matrix & Global Defaults -->
+      <div class="panel-card">
+        <div class="panel-title">
+          <span>Channels (<span id="lblChannelCountNum">4</span>/16)</span>
+          <!-- Pure Icon Button with Tooltip for Add Channel -->
+          <button class="icon-btn" id="btnAddRelay" data-tooltip="Add Relay Channel" aria-label="Add Relay Channel" onclick="addNewRelayChannel()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div class="field-row">
+          <div class="field-head">
+            <span class="field-label">Default Pulse Duration</span>
+            <span class="field-label" id="valDefaultPulseLabel" style="font-family: var(--font-mono); color: var(--accent-amber-soft);">500 ms</span>
+          </div>
+          <input type="number" class="field-input-box" id="inpDefaultPulse" min="50" max="60000" step="50" value="500" 
+            onchange="updateDefaultPulse(this.value)">
+        </div>
+
+        <div class="field-row">
+          <div class="field-head">
+            <span class="field-label">Stagger Step Delay</span>
+            <span class="field-label" id="valStaggerDelayLabel" style="font-family: var(--font-mono); color: var(--accent-ice-soft);">200 ms</span>
+          </div>
+          <input type="number" class="field-input-box" id="inpStaggerDelay" min="50" max="5000" step="50" value="200"
+            onchange="updateStaggerDelay(this.value)">
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Right Main Workspace: Relay Cards Grid -->
+    <section class="workspace-main">
+      <div class="relay-grid" id="relayGrid">
+        <!-- Rendered dynamically by JavaScript -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========================================================================
+   * STATUS BAR
+   * ======================================================================== -->
+  <footer class="status-bar">
+    <div class="status-left">
+      <div class="status-item">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Disconnected</span>
+      </div>
+    </div>
+    <div class="status-right">
+      <div class="status-item" id="statusInfo">Ready · Relay Board</div>
+    </div>
+  </footer>
+
+  <!-- ========================================================================
+   * SHELL: Collapsible Bottom Terminal Drawer
+   * ======================================================================== -->
+  <div class="bottom-terminal-drawer" id="bottomTerminalDrawer">
+    <div class="drawer-header">
+      <div class="drawer-title">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="4 17 10 11 4 5"></polyline>
+          <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+        <span>Serial Console · 115200 baud</span>
+      </div>
+      <div class="drawer-actions">
+        <!-- Pure Icon Buttons with Tooltips -->
+        <button class="icon-btn" id="btnQueryInfo" data-tooltip="Query Firmware Info" aria-label="Query firmware info" onclick="sendSerialCmd('info')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+        </button>
+        <button class="icon-btn" id="btnQueryStatus" data-tooltip="Query Channel States" aria-label="Query channel states" onclick="sendSerialCmd('status')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+          </svg>
+        </button>
+        <button class="icon-btn" id="btnQueryList" data-tooltip="List Relay Channels" aria-label="List relay channels" onclick="sendSerialCmd('list')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="8" y1="6" x2="21" y2="6"></line>
+            <line x1="8" y1="12" x2="21" y2="12"></line>
+            <line x1="8" y1="18" x2="21" y2="18"></line>
+            <line x1="3" y1="6" x2="3.01" y2="6"></line>
+            <line x1="3" y1="12" x2="3.01" y2="12"></line>
+            <line x1="3" y1="18" x2="3.01" y2="18"></line>
+          </svg>
+        </button>
+        <button class="icon-btn" id="btnDrawerAllOff" data-tooltip="Emergency Cutoff" aria-label="Emergency all-off" onclick="triggerEmergencyAllOff()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-crimson)" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+          </svg>
+        </button>
+        <span class="drawer-action-divider" aria-hidden="true"></span>
+        <button class="icon-btn" id="btnCopyTerm" data-tooltip="Copy Log to Clipboard" aria-label="Copy serial log to clipboard">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="8" y="8" width="13" height="13" rx="2"></rect>
+            <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"></path>
+          </svg>
+        </button>
+        <button class="icon-btn" id="btnDownloadTerm" data-tooltip="Download Log" aria-label="Download serial log">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
+        <button class="icon-btn" id="btnClearTerm" data-tooltip="Clear Log" aria-label="Clear serial log" onclick="clearTerminalLog()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+        <button class="icon-btn" id="btnCloseDrawer" data-tooltip="Close Drawer" aria-label="Close serial console" onclick="toggleTerminalDrawer(false)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="drawer-body" id="termBody">
+      <!-- Terminal rows injected here -->
+    </div>
+    <div class="drawer-input-row">
+      <input type="text" class="term-input" id="termInput" placeholder="Type a command and press Enter..." autocomplete="off" spellcheck="false">
+      <button class="icon-btn" id="btnTermSend" data-tooltip="Send Command" aria-label="Send command" onclick="sendCustomTerminalCmd()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="22" y1="2" x2="11" y2="13"></line>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+   * MODAL: Hardware & Command Reference
+   * ======================================================================== -->
+  <div class="modal-overlay" id="modalHelp">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">Relay Controller Studio · Reference &amp; Protocol</div>
+        <button class="icon-btn" onclick="closeHelpModal()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="help-section">
+          <h4>Arbitrary Multi-Channel Architecture</h4>
+          <p>
+            This studio supports any custom relay configuration from 1 to 16 channels. You can dynamically add channels via the <code>+</code> icon button, remove channels, assign custom hardware GPIOs, and set aliases.
+          </p>
+        </div>
+        <div class="help-section">
+          <h4>CLI Protocol Reference</h4>
+          <p>Commands transmitted over Web Serial (115200 Baud, 8N1):</p>
+          <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 4px;">
+            <li><code>on &lt;channel&gt;</code>: Energizes relay channel (e.g. <code>on 0</code>).</li>
+            <li><code>off &lt;channel&gt;</code>: De-energizes relay channel (e.g. <code>off 0</code>).</li>
+            <li><code>toggle &lt;channel&gt;</code>: Inverts the relay state.</li>
+            <li><code>pulse &lt;channel&gt; &lt;duration_ms&gt;</code>: Energizes relay for specified milliseconds, then auto de-energizes.</li>
+            <li><code>stop &lt;channel&gt;</code>: Aborts an active pulse on a channel.</li>
+            <li><code>all_off</code>: Emergency master cutoff, resets all channels immediately.</li>
+            <li><code>status</code>: Queries live state and remaining pulse time for all channels.</li>
+            <li><code>list</code>: Lists all configured channels with assigned GPIOs and polarity.</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>Active HIGH vs Active LOW Polarity</h4>
+          <p>
+            Standard optocoupled relay modules usually require <strong>Active LOW</strong> triggering (driving GPIO low energizes relay). Transistor or MOSFET drivers use <strong>Active HIGH</strong>. Configure each channel's polarity to match your hardware.
+          </p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-dialog primary" onclick="closeHelpModal()">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-msg" id="toastMsg"></div>
+
+  <!-- ========================================================================
+   * 6. Application Engine & Logic
+   * ======================================================================== -->
+  <script src="js/state.js"></script>
+  <script src="js/relay-controls.js"></script>
+  <script src="js/serial.js"></script>
+  <script src="js/terminal-ui.js"></script>
+</body>
+</html>
